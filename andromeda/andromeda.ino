@@ -43,10 +43,11 @@
 #define BTN_CLICK   2
 
 // DRIVE MODES
-#define DRIVE_MENU    0
-#define DRIVE_SONAR   1
-#define DRIVE_REMOTE  2
-#define DRIVE_MODES   2
+#define DRIVE_MENU            0
+#define DRIVE_SONAR           1
+#define DRIVE_REMOTE_ONEKEY   2
+#define DRIVE_REMOTE_FULL     3
+#define DRIVE_MODES           3
 
 // IR REMOTE CODES
 #define REMOTE_FORWARD    1033561079 //3838214000
@@ -63,9 +64,6 @@ int robotMovements[][2]={
   {254, 254}, // Turn Right
   {1, 1}      // Turn Left
 };
-
-unsigned long remoteBuffer[25][3];
-int remoteBufferIndex=0;
 
 NewPing sonar(TRIGGER_PIN, ECHO_PIN, MAX_DISTANCE);
 IRrecv irrecv(IR_PIN);
@@ -134,9 +132,20 @@ void loop()
         delay(250);
         lastButtonClick=millis();
       }
+      else if (menuOption==DRIVE_REMOTE_ONEKEY)
+      {
+        Serial.println("MENU REMOTE ONEKEY");
+        toneAC(700,10,500);
+        delay(250);
+        toneAC(700,10,500);
+        delay(250);
+        lastButtonClick=millis();
+      }
       else
       {
-        Serial.println("MENU REMOTE");
+        Serial.println("MENU REMOTE FULL");
+        toneAC(700,10,500);
+        delay(250);
         toneAC(700,10,500);
         delay(250);
         toneAC(700,10,500);
@@ -165,99 +174,31 @@ void loop()
       driveMode=DRIVE_MENU;
       menuOption=DRIVE_MENU;
       toneAC(250,10,1000);
-      //resetRemoteBuffer();
       moveRobot(STOP);
       lastButtonClick=0;
     }
     else
     {
+      if (millis()>time_last_ping+SONAR_MS_CHECK_INTERVAL)
+      {
+        ping_buffer[ping_buffer_index++]=sonar.ping_cm();
+        time_last_ping=millis();
+        if (ping_buffer_index>2) ping_buffer_index=0;
+        distance=(ping_buffer[0]+ping_buffer[1]+ping_buffer[2])/3;
+      }
+      
       if (driveMode==DRIVE_SONAR)
         driveModeSonar();
+      else if (driveMode==DRIVE_REMOTE_ONEKEY)
+        driveModeRemoteOneKey();
       else
-        driveModeRemote();
+        driveModeRemoteFull();
     }
   }
-}
-
-void resetRemoteBuffer()
-{
-  for (int n=0;n<25;n++)
-  {
-    remoteBuffer[n][0]=0;
-    remoteBuffer[n][1]=0;
-    remoteBuffer[n][2]=0;
-  }
-  remoteBufferIndex=0;
-}
-
-void addCodeToRemoteBuffer(long code)
-{
-  remoteBuffer[remoteBufferIndex][0]=code;
-  if (++remoteBufferIndex>24)
-    remoteBufferIndex=0;
-}
-
-void printRemoteBufferSummary(unsigned char movement)
-{
-  int count;
-  for (int n=0; n<25; n++)
-  {
-    count=0;
-    if (remoteBuffer[n][0]==0)
-        break;
-    if (remoteBuffer[n][1]==0)
-    {
-      for (int n1=0; n1<25; n1++)
-      {
-        if (remoteBuffer[n1][0]==0)
-          break;
-        
-        if (remoteBuffer[n1][1]==0 && remoteBuffer[n1][0]==remoteBuffer[n][0])
-        {
-          remoteBuffer[n1][1]=1;
-          count++;
-        }
-      }
-      remoteBuffer[n][2]=count;
-    }
-  }
-
-  
-  if (movement==STOP)
-    Serial.println("STOP ---------------------------------");
-  else if (movement==FORWARD)
-    Serial.println("FORWARD ---------------------------------");
-  else if (movement==BACKWARD)
-    Serial.println("BACKWARD ---------------------------------");
-  else if (movement==TURN_RIGHT)
-    Serial.println("RIGHT ---------------------------------");
-  else if (movement==TURN_LEFT)
-    Serial.println("LEFT ---------------------------------");
-  else
-    Serial.println("---------------------------------");
-  
-  for (int n=0; n<25;n++)
-  {
-    if (remoteBuffer[n][0]==0)
-        break;
-    if (remoteBuffer[n][2]!=0)
-    {
-      Serial.print(remoteBuffer[n][0]);
-      Serial.print(", ");
-      Serial.println(remoteBuffer[n][2]);
-    }
-  }
-  Serial.println("---------------------------------");
 }
 
 void driveModeSonar()
 {
-  if (millis()>time_last_ping+SONAR_MS_CHECK_INTERVAL)
-  {
-    ping_buffer[ping_buffer_index++]=sonar.ping_cm();
-    if (ping_buffer_index>2) ping_buffer_index=0;
-    distance=(ping_buffer[0]+ping_buffer[1]+ping_buffer[2])/3;
-    
     if (distance<SONAR_DISTANCE_TO_STOP)
     {
       // Get right distance
@@ -290,62 +231,59 @@ void driveModeSonar()
         while (millis()<time_ms+SONAR_MS_TURN_LEFT);
       }
       moveRobot(FORWARD);
-    }
-    time_last_ping=millis();
-  }  
+    }  
 }
 
-void driveModeRemote()
+void driveModeRemoteOneKey()
+{   
+  if (irrecv.decode(&results)) 
+  {
+    moveRobot(TURN_LEFT);
+    irrecv.resume(); 
+    lastButtonClick=millis();
+  }
+  else if (millis()>lastButtonClick+250 && distance>=SONAR_DISTANCE_TO_STOP)
+    moveRobot(FORWARD);  
+  else if (millis()>lastButtonClick+250 && distance<SONAR_DISTANCE_TO_STOP)
+    moveRobot(STOP);
+}
+
+void driveModeRemoteFull()
 {
   
   if (irrecv.decode(&results)) 
-  {
-    Serial.println(results.value);
-    //toneAC(1000,10,100);
-    //moveRobot(TURN_LEFT);
-    
-    
+  {    
     switch (results.value)
     {
       case REMOTE_FORWARD:
         moveRobot(FORWARD);
-        //found=true;
         break;
       case REMOTE_BACKWARD:
         moveRobot(BACKWARD);
-        //found=true;
         break;
       case REMOTE_LEFT:
         moveRobot(TURN_LEFT);
-        //found=true;
         break;
       case REMOTE_RIGHT:
         moveRobot(TURN_RIGHT);
-        //found=true;
         break;
       case REMOTE_STOP:
         moveRobot(STOP);
-        //found=true;
         break;  
     }
     
-    irrecv.resume(); // Receive the next value
+    irrecv.resume();
     lastButtonClick=millis();
-  }
-  //else if (millis()>lastButtonClick+250)
-  //  moveRobot(FORWARD);
-  
+  }  
 }
 
 void moveRobot(unsigned char direction)
 {
   if (robotCurrentMove==direction)
     return;
+    
   robotCurrentMove=direction;
 
-  //printRemoteBufferSummary(direction);
-  //resetRemoteBuffer();
-  
   analogWrite(LSERVO_PIN,robotMovements[direction][0]);
   analogWrite(RSERVO_PIN,robotMovements[direction][1]);
 }
